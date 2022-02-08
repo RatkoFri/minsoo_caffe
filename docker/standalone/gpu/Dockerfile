@@ -57,7 +57,7 @@ RUN ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
 RUN cmake --version
 
 RUN mkdir build && cd build && \
-    cmake -DUSE_CUDNN=1 -DUSE_NCCL=1 -DCUDA_ARCH_NAME=Volta .. && \
+    cmake -DUSE_CUDNN=0 -DUSE_NCCL=0 -DCUDA_ARCH_NAME=Pascal .. && \
     make -j"$(nproc)"
 
 ENV PYCAFFE_ROOT $CAFFE_ROOT/python

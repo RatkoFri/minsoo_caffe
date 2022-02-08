@@ -255,6 +255,10 @@ int train() {
         batnorm_meanscale = 1.0;
         batnorm_variscale = 1.0;
         break;
+      case 4: // fixed
+        batnorm_meanscale = 1.0;
+        batnorm_variscale = 1.0;
+        break;
       default:
         std::cout << "undefined mult_type: " << mult_type << std::endl;
         exit(1);
@@ -320,6 +324,7 @@ int train() {
       solver(caffe::SolverRegistry<float>::CreateSolver(solver_param));
 
   solver->SetActionFunction(signal_handler.GetActionFunction());
+  statis_on = false;
 
   if (FLAGS_snapshot.size()) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
@@ -431,6 +436,10 @@ int test() {
         batnorm_variscale = 1.0;
         break;
       case 3: // fixed
+        batnorm_meanscale = 1.0;
+        batnorm_variscale = 1.0;
+        break;
+      case 4: // fixed
         batnorm_meanscale = 1.0;
         batnorm_variscale = 1.0;
         break;

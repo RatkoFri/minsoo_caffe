@@ -82,6 +82,7 @@ void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       dump_layer += 1;
     }
   }
+  statis_on = false;
 
   // MINSOO status gathering
   if (statis_on) {

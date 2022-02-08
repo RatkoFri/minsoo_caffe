@@ -22,7 +22,7 @@
 #include <iostream>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <device_functions.h>
+//#include <device_functions.h>
 #include <curand.h>
 #include <curand_kernel.h>
 #include <stdio.h>
@@ -79,7 +79,47 @@ __device__ void float2bfloat(const float src, float& dst) {
 	q[1] = p[1];
 #endif
 }
-	
+
+__global__ void mult_float(
+                  const float*_op_A, const float*_op_B, float* _C, 
+                  unsigned int _M, unsigned int _N, unsigned int _K,
+                  unsigned int _drum_k, 
+                  unsigned int _allnumbits, unsigned int _mantissa_numbits, 
+                  const float _alpha, const float _beta)
+{
+//{{{
+  unsigned int row =  blockIdx.y*blockDim.y + threadIdx.y;
+  unsigned int col =  blockIdx.x*blockDim.x + threadIdx.x ;
+ 
+  // check & conversion for negativeness, zero, and leading one 
+  if(row < _M && col < _N) 
+  {
+    double sum = 0;
+    for (int i = 0; i < _K; i++)
+    {
+			float A = _op_A[i * _M + row];
+			float B = _op_B[_K * col + i];
+
+			float mult = A * B;
+			sum += mult;
+    } // End of for (int i = 0; i < _K; i++)
+    //printf("Hello float \n");
+		float accum = sum;
+    accum *= _alpha;
+    float temp = _beta; 
+    temp *= _C[col *_M + row]; // column major order for CUBLAS
+    temp += accum;
+    _C[col*_M + row] = temp;
+     
+  } // End of if(row < _M && col < _N) 
+
+  __syncthreads();
+  
+  return;
+
+}
+
+
 __global__ void mult_bfloat16(
                   const float*_op_A, const float*_op_B, float* _C, 
                   unsigned int _M, unsigned int _N, unsigned int _K,
@@ -101,15 +141,12 @@ __global__ void mult_bfloat16(
 			float B = _op_B[_K * col + i];
 			float tempA = 0;
 			float tempB = 0;
-			//float2bfloat(A, tempA);
-			//float2bfloat(B, tempB);
-            tempA = A;
-            tempB = B;
+			float2bfloat(A, tempA);
+			float2bfloat(B, tempB);
 			float mult = tempA * tempB;
-			//float real_ma_out = 0;
-			float real_ma_out = mult;
+			float real_ma_out = 0;
             //printf("A: %4.4f, B: %4.4f, P: %4.4f\n",A,B,real_ma_out);
-            //float2bfloat(mult,real_ma_out);
+            float2bfloat(mult,real_ma_out);
 			sum += real_ma_out;
     } // End of for (int i = 0; i < _K; i++)
     //printf("Here \n");
@@ -153,7 +190,7 @@ __global__ void mult_bfloat16_ILM2(
 			float tempB = 0;
 			float2bfloat(A, tempA);
 			float2bfloat(B, tempB);
-			float mult = fp32_mul_ILM(tempA,tempB,1);
+			float mult = fp32_mul_ILM(tempA,tempB,2);
 			float real_ma_out = 0;
 			float2bfloat(mult,real_ma_out);
 			sum += real_ma_out;
@@ -200,7 +237,7 @@ __global__ void mult_bfloat16_ILM1(
 			float tempB = 0;
 			float2bfloat(A, tempA);
 			float2bfloat(B, tempB);
-			float mult = fp32_mul_ILM(tempA,tempB,2);
+			float mult = fp32_mul_ILM(tempA,tempB,1);
 			float real_ma_out = 0;
 			float2bfloat(mult,real_ma_out);
 			sum += real_ma_out;
@@ -372,7 +409,7 @@ __device__  uint32_t uint_as_floatV2 (float a)
     return r;
 }
 
-__device__ float uint_as_floatV2 (uint32_t a)
+__device__ float float_as_uintV2 (uint32_t a)
 {
     float r;
     memcpy (&r, &a, sizeof r);
@@ -381,7 +418,7 @@ __device__ float uint_as_floatV2 (uint32_t a)
 
 __device__ float fp32_mul_ILM (float a, float b, uint8_t iter)
 {
-    return uint_as_floatV2 (fp32_mul_core (uint_as_floatV2 (a), uint_as_floatV2 (b),iter));
+    return float_as_uintV2 (fp32_mul_core (uint_as_floatV2 (a), uint_as_floatV2 (b),iter));
 }
 
 __device__ unsigned int xorshift( unsigned int _state) 

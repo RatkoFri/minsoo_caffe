@@ -1,4 +1,4 @@
-#include <math_functions.h>  // CUDA's, not caffe's, for fabs, signbit
+#include <cuda_runtime.h>  // CUDA's, not caffe's, for fabs, signbit
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>  // thrust::plus
 #include <thrust/reduce.h>
@@ -33,6 +33,7 @@ extern unsigned int drum_k;
 //unsigned int numbits_lsr;       // bits used as weights in logarithmic stochastic rounding 
 #define MULT_SWITCH 12 
 #define BLOCK_SIZE 32
+#define BLOCK_SIZE1 64
 #define DRUM_K 4
 #define ALLNUMBITS INTBITS+FRACBITS
 #include <cstddef> 
@@ -138,24 +139,30 @@ void caffe_gpu_gemm_approx<float>(const CBLAS_TRANSPOSE TransA,
 
   dim3 threadsPerBlock(M, N); // x, y
   dim3 blocksPerGrid(1, 1);
-  if (N*M > BLOCK_SIZE*BLOCK_SIZE)
+  if (N*M > BLOCK_SIZE1*BLOCK_SIZE1)
   {
-    threadsPerBlock.x = BLOCK_SIZE;
-    threadsPerBlock.y = BLOCK_SIZE;
+    threadsPerBlock.x = BLOCK_SIZE1;
+    threadsPerBlock.y = BLOCK_SIZE1;
     blocksPerGrid.x = ceil(double(M)/double(threadsPerBlock.x));
     blocksPerGrid.y = ceil(double(N)/double(threadsPerBlock.y));
   }
 
   switch (mult_type) 
   {
-    case 2: // FIXED
+    case 2: // BFLOAT
      mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_B, dop_A, C, N, M, K, drum_k,
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);    
       break;
-    case 3: // FIXED
+    case 3: // ILM1
+      //mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
       mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_B, dop_A, C, N, M, K, drum_k,
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
+        ALLNUMBITS, FRACBITS,  alpha, beta);   
+      break;
+    case 4: // FLOAT
+      mult_float<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
     default :
@@ -256,15 +263,19 @@ void caffe_gpu_gemv_approx<float>(const CBLAS_TRANSPOSE TransA, const int M,
  
   switch (mult_type) 
   {
-    case 2: // FIXED
+    case 2: // BFLOAT
       mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_A, dop_B, y, row, col, N, drum_k,
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
-    case 3: // FIXED
+    case 3: // ILM1
       mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
-//      mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_A, dop_B, y, row, col, N, drum_k,
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
+        ALLNUMBITS, FRACBITS,  alpha, beta);   
+      break;
+    case 4: // FLOAT
+      mult_float<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
     default :
@@ -280,7 +291,6 @@ void caffe_gpu_gemv_approx<float>(const CBLAS_TRANSPOSE TransA, const int M,
   
   return;
 }
-//}}}
 
 template <>
 void caffe_gpu_gemv_approx<double>(const CBLAS_TRANSPOSE TransA, const int M,
@@ -345,14 +355,19 @@ void caffe_gpu_gemm_approxV2<float>(const CBLAS_TRANSPOSE TransA,
 
   switch (mult_type) 
   {
-    case 2: // FIXED
-      mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_B, dop_A, C, N, M, K, drum_k,
+    case 2: // BFLOAT
+     mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
+        ALLNUMBITS, FRACBITS,  alpha, beta);    
+      break;
+    case 3: // ILM1
+      mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
-    case 3: // FIXED
-      mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_B, dop_A, C, N, M, K, drum_k,
+    case 4: // FLOAT
+      mult_float<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_B, dop_A, C, N, M, K, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
     default :
@@ -381,6 +396,7 @@ void caffe_gpu_gemm_approxV2<double>(const CBLAS_TRANSPOSE TransA,
     std::cout << "ERROR: caffe_gpu_gemm_approx<double> called" << std::endl;
     throw;
 }
+
 
 
 template <>
@@ -453,14 +469,19 @@ void caffe_gpu_gemv_approxV2<float>(const CBLAS_TRANSPOSE TransA, const int M,
  
   switch (mult_type) 
   {
-    case 2: // Exact 
+    case 2: // BFLOAT
       mult_bfloat16<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_A, dop_B, y, row, col, N, drum_k, 
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
-    case 3: // ILM
-      mult_bfloat16_ILM2<<<blocksPerGrid,threadsPerBlock>>>
-        (dop_A, dop_B, y, row, col, N, drum_k, 
+    case 3: // ILM1
+      mult_bfloat16_ILM1<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
+        ALLNUMBITS, FRACBITS,  alpha, beta);   
+      break;
+    case 4: // FLOAT
+      mult_float<<<blocksPerGrid,threadsPerBlock>>>
+        (dop_A, dop_B, y, row, col, N, DRUM_K,
         ALLNUMBITS, FRACBITS,  alpha, beta);   
       break;
     default :
@@ -476,6 +497,7 @@ void caffe_gpu_gemv_approxV2<float>(const CBLAS_TRANSPOSE TransA, const int M,
   
   return;
 }
+
 //}}}
 
 template <>
@@ -487,6 +509,8 @@ void caffe_gpu_gemv_approxV2<double>(const CBLAS_TRANSPOSE TransA, const int M,
     throw;
     
 }
+
+
 //{{{
 template <>
 void caffe_gpu_axpy<float>(const int N, const float alpha, const float* X,

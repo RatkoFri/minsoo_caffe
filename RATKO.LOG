@@ -1,0 +1,21 @@
+ILM rezultati 
+
+Aproksimativno množenje le v konvolucijskih slojih
+
+I0202 10:48:37.042209  4318 solver.cpp:219] Iteration 63900 (0.959529 iter/s, 104.218s/100 iters), loss = 0.293279
+I0202 10:48:37.042361  4318 solver.cpp:238]     Train net output #0: Accuracy = 0.890625
+I0202 10:48:37.042374  4318 solver.cpp:238]     Train net output #1: loss = 0.293279 (* 1 = 0.293279 loss)
+I0202 10:48:37.042379  4318 sgd_solver.cpp:105] Iteration 63900, lr = 0.001
+I0202 10:50:20.226136  4318 solver.cpp:448] Snapshotting to binary proto file resnet-20/snapshot/_iter_64000.caffemodel
+I0202 10:50:20.231865  4318 sgd_solver.cpp:273] Snapshotting solver state to binary proto file resnet-20/snapshot/_iter_64000.solverstate
+I0202 10:50:20.336259  4318 solver.cpp:311] Iteration 64000, loss = 0.254322
+I0202 10:50:20.336278  4318 solver.cpp:331] Iteration 64000, Testing net (#0)
+I0202 10:50:27.960990  4324 data_layer.cpp:73] Restarting data prefetching from start.
+I0202 10:50:28.271562  4318 solver.cpp:398]     Test net output #0: Accuracy = 0.8748
+I0202 10:50:28.271598  4318 solver.cpp:398]     Test net output #1: loss = 0.446047 (* 1 = 0.446047 loss)
+I0202 10:50:28.271605  4318 solver.cpp:316] Optimization Done.
+I0202 10:50:28.271607  4318 caffe.cpp:347] Optimization Done.
+
+Aproksimativno množenje v vseh slojih
+
+
