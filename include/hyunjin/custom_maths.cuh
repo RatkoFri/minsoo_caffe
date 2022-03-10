@@ -211,6 +211,52 @@ __global__ void mult_bfloat16_ILM2(
 
 }
 //}}}
+__global__ void mult_bfloat16_ILM3(
+                  const float*_op_A, const float*_op_B, float* _C, 
+                  unsigned int _M, unsigned int _N, unsigned int _K,
+                  unsigned int _drum_k, 
+                  unsigned int _allnumbits, unsigned int _mantissa_numbits, 
+                  const float _alpha, const float _beta)
+{
+//{{{
+  unsigned int row =  blockIdx.y*blockDim.y + threadIdx.y;
+  unsigned int col =  blockIdx.x*blockDim.x + threadIdx.x ;
+ 
+  // check & conversion for negativeness, zero, and leading one 
+  if(row < _M && col < _N) 
+  {
+    double sum = 0;
+    //printf("Hello from ILM3\n");
+
+    for (int i = 0; i < _K; i++)
+    {
+			float A = _op_A[i * _M + row];
+			float B = _op_B[_K * col + i];
+			float tempA = 0;
+			float tempB = 0;
+			float2bfloat(A, tempA);
+			float2bfloat(B, tempB);
+			float mult = fp32_mul_ILM(tempA,tempB,3);
+			float real_ma_out = 0;
+			float2bfloat(mult,real_ma_out);
+			sum += real_ma_out;
+    } // End of for (int i = 0; i < _K; i++)
+    //printf("Here \n");
+		float accum = sum;
+    accum *= _alpha;
+    float temp = _beta; 
+    temp *= _C[col *_M + row]; // column major order for CUBLAS
+    temp += accum;
+    _C[col*_M + row] = temp;
+     
+  } // End of if(row < _M && col < _N) 
+
+  __syncthreads();
+  
+  return;
+
+}
+
 
 
 __global__ void mult_bfloat16_ILM1(
@@ -288,24 +334,36 @@ __device__ uint16_t ILM(uint8_t a, uint8_t b, uint8_t iter){
     Ka = LOD(a);
     Kb = LOD(b);
 
-    uint8_t ResA, ResB, Res2B;
+    uint8_t ResA, ResB, Res2A,Res2B,Res3B;
     ResA = a ^ (1 << Ka);
     ResB = b ^ (1 << Kb);
 
-    uint16_t prod0, prod1;
+    uint16_t prod0, prod1,prod2;
     prod0 = a * (1<<Kb) + ResB * (1<<Ka);
     prod1 = 0;
+    prod2 = 0;
+
     if(iter == 2){
         if(ResA == 0 || ResB == 0) {
             return prod0;
         }
         Ka = LOD(ResA);
         Kb = LOD(ResB);
+        Res2A = ResA ^ (1 << Kb);
         Res2B = ResB ^ (1 << Kb);
+
         prod1 = ResA * (1<<Kb) + Res2B * (1<<Ka);
     }
-
-    return prod0 + prod1;
+    if(iter == 3){
+        if(Res2A == 0 || ResB == 0) {
+            return prod0+prod1;
+        }
+        Ka = LOD(Res2A);
+        Kb = LOD(Res2B);
+        Res3B = Res2B ^ (1 << Kb);
+        prod2 = Res2A * (1<<Kb) + Res3B * (1<<Ka);
+    }
+    return prod0 + prod1 + prod2;
 }
 
 __device__ uint32_t fp32_mul_core (uint32_t a, uint32_t b, uint8_t iter)
