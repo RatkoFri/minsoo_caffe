@@ -279,7 +279,7 @@ __global__ void FCCForward_ILM1(const int nthreads,
       float tempB = 0;
       float2bfloat_fc(A, tempA);
       float2bfloat_fc(B, tempB);
-      float mult = fp32_mul_ILM_fc(tempA,tempB,1);
+      float mult = fp32_mul_ILM_fc(tempA,tempB,2);
       float real_ma_out = 0;
         //printf("A: %4.4f, B: %4.4f, P: %4.4f\n",A,B,real_ma_out);
       float2bfloat_fc(mult,real_ma_out);
