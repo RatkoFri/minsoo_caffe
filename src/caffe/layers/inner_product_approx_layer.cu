@@ -205,7 +205,7 @@ __device__ Dtype mult_fixed_fc(const Dtype *a, const Dtype *b)
   x = *a <= -MAX1 ? -(1<<15) : x;
   y = *b >= MAX1 ? (1<<15)-1 : y;
   y = *b <= -MAX1 ? -(1<<15) : y;
-  z = LOBO_fc(x,y,12,8,12); 
+  z = ELM_fc(x,y,3); 
   return ((Dtype)z / (1 << 2 * P));
  //return *a * *b;
 }
