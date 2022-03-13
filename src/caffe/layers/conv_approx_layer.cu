@@ -180,11 +180,11 @@ __device__ int ELM_conv(int x, int y, int w) {
 		PP_1 = (PP_1 - 1) | 1; 
 	}
 	sum +=  PP_1 <<14;
-	printf(" \t PP_1 = %d \n", PP_1);
+	//printf(" \t PP_1 = %d \n", PP_1);
 
 	//int PP_0 = x0_signed*y0_signed;
 	int PP_0 = LM_conv(x0_signed,y,w);
-	printf("\t PP0 = %d \n",PP_0);
+	//printf("\t PP0 = %d \n",PP_0);
 	
 	sum += PP_0;
 
