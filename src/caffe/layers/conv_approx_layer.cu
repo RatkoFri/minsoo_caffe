@@ -1,6 +1,6 @@
 #include <vector>
 
-#include "caffe/layers/conv_layer_approx.hpp"
+#include "caffe/layers/conv_approx_layer.hpp"
 //#include "caffe/util/approx_mult.hpp"
 
 

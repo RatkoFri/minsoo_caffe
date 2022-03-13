@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "caffe/filler.hpp"
-#include "caffe/layers/inner_product_layer_approx.hpp"
+#include "caffe/layers/inner_product_approx_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
 
