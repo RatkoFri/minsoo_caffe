@@ -8,7 +8,7 @@
 
 
 #define P 12
-#define MAX 1<<(15-P)
+#define MAX1 1<<(15-P)
 
 namespace caffe{
 
@@ -201,10 +201,10 @@ __device__ Dtype mult_fixed_fc(const Dtype *a, const Dtype *b)
   // Cutting off in quantization
   x = (short)(*a * (1 << P));
   y = (short)(*b * (1 << P));
-  x = *a >= MAX ? (1<<15)-1 : x;
-  x = *a <= -MAX ? -(1<<15) : x;
-  y = *b >= MAX ? (1<<15)-1 : y;
-  y = *b <= -MAX ? -(1<<15) : y;
+  x = *a >= MAX1 ? (1<<15)-1 : x;
+  x = *a <= -MAX1 ? -(1<<15) : x;
+  y = *b >= MAX1 ? (1<<15)-1 : y;
+  y = *b <= -MAX1 ? -(1<<15) : y;
   z = LOBO_fc(x,y,12,8,12); 
   return ((Dtype)z / (1 << 2 * P));
  //return *a * *b;
