@@ -1,48 +1,20 @@
+
+
 #include <vector>
 
 #include "caffe/filler.hpp"
-#include "caffe/layers/inner_product_approx_layer.hpp"
+#include "caffe/layers/inner_product_layer_approx.hpp"
 #include "caffe/util/math_functions.hpp"
 
-extern unsigned int mult_type;         // multiplier mode
 
-#define FLOAT_MANT_BITS    (23)
-#define FLOAT_EXPO_BITS    (8)
-#define FLOAT_EXPO_BIAS    (127)
-#define FLOAT_MANT_MASK    (~((~0u) << (FLOAT_MANT_BITS+1))) /* incl. integer bit */
-#define EXPO_ADJUST        (1)   /* adjustment for performance reasons */
-#define MIN_NORM_EXPO      (1)   /* minimum biased exponent of normals */
-#define MAX_NORM_EXPO      (254) /* maximum biased exponent of normals */
-#define INF_EXPO           (255) /* biased exponent of infinities */
-#define EXPO_MASK          (~((~0u) << FLOAT_EXPO_BITS))
-#define FLOAT_SIGN_MASK    (0x80000000u)
-#define FLOAT_IMPLICIT_BIT (1 << FLOAT_MANT_BITS)
-#define RND_BIT_SHIFT      (31)
-#define RND_BIT_MASK       (1u << RND_BIT_SHIFT)
-#define FLOAT_INFINITY     (0x7f800000)
-#define FLOAT_INDEFINITE   (0xffc00000u)
-#define MANT_LSB           (0x00000001)
-#define FLOAT_QNAN_BIT     (0x00400000)
-#define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
+#define P 12
+#define MAX 1<<(15-P)
 
-namespace caffe {
+namespace caffe{
 
-
-
-__device__ void float2bfloat_fc(const float src, float& dst) {
-	const uint16_t* p = reinterpret_cast<const uint16_t*>(&src);
-	uint16_t* q = reinterpret_cast<uint16_t*>(&dst);
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-  q[0] = p[0];
-  q[1] = 0;
-#else
-	q[0] = 0;
-	q[1] = p[1];
-#endif
-}
-
-__device__ uint8_t LOD_fc(uint8_t val){
-    uint32_t n = 0, x;
+__device__   int leadingBitPosition_fc(int val)
+  {
+    unsigned n = 0, x;
     x = val;
     if (x <= 0x0000ffff) n += 16, x <<= 16;
     if (x <= 0x00ffffff) n += 8, x <<= 8;
@@ -50,156 +22,196 @@ __device__ uint8_t LOD_fc(uint8_t val){
     if (x <= 0x3fffffff) n += 2, x <<= 2;
     if (x <= 0x7fffffff) n++;
     return 31 - n;
+  }
+
+// logarithmic product approximation 
+__device__ int LPPG_fc(int x, int y, char qx, char qy) {
+
+  unsigned short x0_abs, y_abs;
+  int  ilm_as, ilm_bs,x00;
+  int ilm_s;
+  char sgn_x = x >= 0 ? 0 : 1;
+  char sgn_y = y >= 0 ? 0 : 1;
+  //x0_abs = sgn_x ? -(x)  : x;
+  //y_abs = sgn_y ? -(y) : y;
+  x0_abs = sgn_x ? -x-1  : x;
+  y_abs = sgn_y ? -y-1 : y;
+  char k1_tmp = leadingBitPosition_fc(x0_abs);
+  char k2_tmp = leadingBitPosition_fc(y_abs);
+  unsigned int k1, sk2;
+  // quantization
+  k1 = k1_tmp >= qx ? k1_tmp : 0;
+  sk2 = k2_tmp >= qy ? (1 << (k2_tmp- qy)) : 0;
+  // substitution
+  x00 = x0_abs - (1 << k1);
+
+  // add these to the simulation
+  ilm_bs = ((sgn_x ^ sgn_y) ? (-x00-1)*sk2 : x00*sk2)*((y != 0 ) && x0_abs != 0) ;
+  ilm_as = ((sgn_x ^ sgn_y) ? (-y_abs-1)*(1 << k1) : y_abs * (1 << k1))*( x != 0 );
+
+
+  ilm_s = (ilm_bs << qy) + (ilm_as);
+  //printf(" ILM = %d,  ilm_bs = %d, ilm_as = %d \n", ilm_s, ilm_bs, ilm_as);
+  //printf("  ILM_product: %d \t", ilm_s);
+
+  return ilm_s;
 }
 
-__device__ uint16_t ILM_fc(uint8_t a, uint8_t b, uint8_t iter){
-    /*
-        a, b -> input operands,
-        iter -> number of iterations
-        only two iterations supported
-    */
-    if (a == 0 || b == 0) return 0;
+__device__ int LOBO_fc(int x, int y, char d, char qx, char qy) {
+  if(x == 0 | y == 0) return 0;  
+	int sum = 0;
+	int x0, x1, x0_signed,sum_lower;
+	x1 = x >> d;
+	//printf("\n x1 = %d", x1);
+ 	x0 = x % (1 << d);
+	x0_signed = x0;
+	int sd = 1 << d;
+	if(x0 < -sd/2) x0_signed = x0 + sd;
+	if(x0 >  sd/2) x0_signed = x0 - sd;
+	// Caclulation of LSB 
+	x1 += (x0_signed < 0);
 
-    uint8_t Ka, Kb; 
-    Ka = LOD_fc(a);
-    Kb = LOD_fc(b);
+	sum_lower = LPPG_fc(x0_signed,y,qx,qy);
 
-    uint8_t ResA, ResB, Res2B;
-    ResA = a ^ (1 << Ka);
-    ResB = b ^ (1 << Kb);
+	sum = (y * x1)*(1 << d) + sum_lower*(x0_signed != 0 && y != 0);
 
-    uint16_t prod0, prod1;
-    prod0 = a * (1<<Kb) + ResB * (1<<Ka);
-    prod1 = 0;
-    if(iter == 2){
-        if(ResA == 0 || ResB == 0) {
-            return prod0;
-        }
-        Ka = LOD_fc(ResA);
-        Kb = LOD_fc(ResB);
-        Res2B = ResB ^ (1 << Kb);
-        prod1 = ResA * (1<<Kb) + Res2B * (1<<Ka);
-    }
-
-    return prod0 + prod1;
+	return sum;
 }
 
-__device__ uint32_t fp32_mul_core_fc (uint32_t a, uint32_t b, uint8_t iter)
+
+__device__ LM_fc( int a,  int b, unsigned short w) {
+    unsigned short n;
+	n = 16;
+	if(a == 0 || b == 0) return 0;
+	char sgn_a = a > 0 ? 0 : 1;
+	char sgn_b = b > 0 ? 0 : 1;
+	unsigned int a_abs = sgn_a ? -(a)-1  : a;
+	unsigned int b_abs = sgn_b ? -(b)-1 : b;
+
+	// mux 
+	unsigned int a_sel = a_abs;
+	unsigned int b_sel = b_abs;
+
+	unsigned int k_a, x_a;
+	k_a = leadingBitPosition_fc(a_sel);
+	x_a = a_sel << (n - 1 - k_a);
+    //printf("Xa = %x \n", x_a);
+	unsigned int  k_b, x_b;
+	k_b = leadingBitPosition_fc(b_sel);
+	x_b = b_sel << (n - 1 - k_b);
+    //printf("Xb = %x \n", x_b);
+
+    unsigned int tmp, tmp_prim;
+    tmp = (1<<(n-1))-1;
+    tmp_prim = ((1<<(n-1)) - (1<<(n-w)));
+
+	unsigned int y_a, y_b, tmp_a, tmp_b;
+	tmp_a = x_a & tmp;
+	y_a = x_a & tmp_prim;
+	y_a = y_a | (1 << (n-w-1));
+    //printf("Ya = %x \n", y_a);
+
+	tmp_b = x_b & tmp;
+	y_b = x_b & tmp_prim;
+	y_b = y_b | (1 << (n-w-1));
+
+	//printf("Yb = %x \n", y_b);
+	//char tresh = Q;
+
+	// We truncate mantissa 
+	unsigned int y_l;
+
+	y_l = (y_a + y_b) & tmp;
+	// We set the LSB of k_a and k_b to zero 
+
+	unsigned int k_l;
+
+	k_l = k_a + k_b + (((y_a + y_b) & (tmp+1)) >> (n - 1));
+
+	double m;
+	unsigned int p_abs;
+	m = (double)y_l / (1 << 15);
+
+	p_abs = (unsigned int)((1 + m)*(1 << k_l));
+
+	int zero = (a == 0) || (b == 0)  ;
+	int p;
+	p = (sgn_a ^ sgn_b)? -p_abs-1 : p_abs; 
+	p = p*(1-zero);
+	return p;
+}
+
+
+__device__ int ELM_fc(int x, int y, int w) {
+	int sum = 0;
+	int x0, x1, x0_signed, x0_abs;
+	char sign;
+	// X = X1*2^14 + X0
+	// X1 = -2*x15+x14+x13
+	// X0 = -x13*2^13 + sum_(i=0)^(12)(x_i*2^i)
+	x1 = x >> 14;
+ 	x0 = x % (1 << 14);
+	x0_signed = x0;
+	if(x0 < -8192) x0_signed = x0 + 16384;
+	if(x0 >  8192) x0_signed = x0 - 16384;
+	// Caclulation of LSB 
+	x0_abs = x0_signed;
+	x1 += (x0_signed < 0);
+
+	int y0, y1, y0_signed, y0_abs;
+	// Y = Y1*2^14 + Y0
+	// X1 = -2*y15+y14+y13
+	// X0 = -y13*2^13 + sum_(i=0)^(12)(y_i*2^i)
+	y1 = y >> 14;
+ 	y0 = y % (1 << 14);
+	y0_signed = y0;
+	if(y0 < -8192) y0_signed = y0 + 16384;
+	if(y0 >  8192) y0_signed = y0 - 16384;
+	// Caclulation of LSB 
+	y0_abs = y0_signed;
+	y1 += (y0_signed < 0);
+
+	// Calculation of product 
+	// PP_3 = X1*Y1
+
+	// PP_2 = X1*Y0, PP_1 = Y1*X0
+
+	int PP_1 = x1*y;
+	if(PP_1 < 0){
+		PP_1 = (PP_1 - 1) | 1; 
+	}
+	sum +=  PP_1 <<14;
+	printf(" \t PP_1 = %d \n", PP_1);
+
+	//int PP_0 = x0_signed*y0_signed;
+	int PP_0 = LM_fc(x0_signed,y,w);
+	printf("\t PP0 = %d \n",PP_0);
+	
+	sum += PP_0;
+
+	return sum;
+
+}
+
+template <typename Dtype>
+__device__ Dtype mult_fixed_fc(const Dtype *a, const Dtype *b)
 {
-    uint64_t prod;
-    uint32_t expoa, expob, manta, mantb, shift;
-    uint32_t r, signr, expor, mantr_hi, mantr_lo;
-
-    /* split arguments into sign, exponent, significand */
-    expoa = ((a >> FLOAT_MANT_BITS) & EXPO_MASK) - EXPO_ADJUST;
-    expob = ((b >> FLOAT_MANT_BITS) & EXPO_MASK) - EXPO_ADJUST;
-    manta = (a | FLOAT_IMPLICIT_BIT) & FLOAT_MANT_MASK;
-    mantb = (b | FLOAT_IMPLICIT_BIT) & FLOAT_MANT_MASK;
-    /* result sign bit: XOR sign argument signs */
-    signr = (a ^ b) & FLOAT_SIGN_MASK;
-    if ((expoa >= (MAX_NORM_EXPO - EXPO_ADJUST)) || /* at least one argument is special */
-        (expob >= (MAX_NORM_EXPO - EXPO_ADJUST))) { 
-        if ((a & ~FLOAT_SIGN_MASK) > FLOAT_INFINITY) { /* a is NaN */
-            /* return quietened NaN */
-            return a | FLOAT_QNAN_BIT;
-        }
-        if ((b & ~FLOAT_SIGN_MASK) > FLOAT_INFINITY) { /* b is NaN */
-            /* return quietened NaN */
-            return b | FLOAT_QNAN_BIT;
-        }
-        if ((a & ~FLOAT_SIGN_MASK) == 0) { /* a is zero */
-            /* return NaN if b is infinity, else zero */
-            return (expob != (INF_EXPO - EXPO_ADJUST)) ? signr : FLOAT_INDEFINITE;
-        }
-        if ((b & ~FLOAT_SIGN_MASK) == 0) { /* b is zero */
-            /* return NaN if a is infinity, else zero */
-            return (expoa != (INF_EXPO - EXPO_ADJUST)) ? signr : FLOAT_INDEFINITE;
-        }
-        if (((a & ~FLOAT_SIGN_MASK) == FLOAT_INFINITY) || /* a or b infinity */
-            ((b & ~FLOAT_SIGN_MASK) == FLOAT_INFINITY)) {
-            return signr | FLOAT_INFINITY;
-        }
-        if ((int32_t)expoa < (MIN_NORM_EXPO - EXPO_ADJUST)) { /* a is subnormal */
-            /* normalize significand of a */
-            manta = a & FLOAT_MANT_MASK;
-            expoa++;
-            do {
-                manta = 2 * manta;
-                expoa--;
-            } while (manta < FLOAT_IMPLICIT_BIT);
-        } else if ((int32_t)expob < (MIN_NORM_EXPO - EXPO_ADJUST)) { /* b is subnormal */
-            /* normalize significand of b */
-            mantb = b & FLOAT_MANT_MASK;
-            expob++;
-            do {
-                mantb = 2 * mantb;
-                expob--;
-            } while (mantb < FLOAT_IMPLICIT_BIT);
-        }
-    }
-    /* result exponent: add argument exponents and adjust for biasing */
-    expor = expoa + expob - FLOAT_EXPO_BIAS + 2 * EXPO_ADJUST;
-    mantb = mantb ; /* preshift to align result signficand */
-    /* result significand: multiply argument signficands */
-    uint8_t mantA_short = manta >> 16; // Take only 8 bits (1 plus 7 bits of mantissa)
-    uint8_t mantB_short = mantb >> 16; // Take only 8 bits (1 plus 7 bits of mantissa)
-    uint16_t p_short = ILM_fc(mantA_short,mantB_short,iter);
-
-    prod = (uint64_t)p_short << 32;
-    prod = prod << FLOAT_EXPO_BITS;
-    mantr_hi = (uint32_t)(prod >> 32);
-    mantr_lo = (uint32_t)(prod >>  0);
-    /* normalize significand */
-    if (mantr_hi < FLOAT_IMPLICIT_BIT) {
-        mantr_hi = (mantr_hi << 1) | (mantr_lo >> (32 - 1));
-        mantr_lo = (mantr_lo << 1);
-        expor--;
-    }
-    if (expor <= (MAX_NORM_EXPO - EXPO_ADJUST)) { /* normal, may overflow to infinity during rounding */
-        /* combine biased exponent, sign and signficand */
-        r = (expor << FLOAT_MANT_BITS) + signr + mantr_hi;
-        /* round result to nearest or even; overflow to infinity possible */
-        r = r + ((mantr_lo == RND_BIT_MASK) ? (mantr_hi & MANT_LSB) : (mantr_lo >> RND_BIT_SHIFT));
-    } else if ((int32_t)expor > (MAX_NORM_EXPO - EXPO_ADJUST)) { /* overflow */
-        /* return infinity */
-        r = signr | FLOAT_INFINITY;
-    } else { /* underflow */
-        /* return zero, normal, or smallest subnormal */
-        shift = 0 - expor;
-        if (shift > MAX_SHIFT) shift = MAX_SHIFT;
-        /* denormalize significand */
-        mantr_lo = mantr_hi << (32 - shift) | (mantr_lo ? 1 : 0);
-        mantr_hi = mantr_hi >> shift;
-        /* combine sign and signficand; biased exponent known to be zero */
-        r = mantr_hi + signr;
-        /* round result to nearest or even */
-        r = r + ((mantr_lo == RND_BIT_MASK) ? (mantr_hi & MANT_LSB) : (mantr_lo >> RND_BIT_SHIFT));
-    }
-    return r;
+  int x, y;
+  int z;
+  // Cutting off in quantization
+  x = (short)(*a * (1 << P));
+  y = (short)(*b * (1 << P));
+  x = *a >= MAX ? (1<<15)-1 : x;
+  x = *a <= -MAX ? -(1<<15) : x;
+  y = *b >= MAX ? (1<<15)-1 : y;
+  y = *b <= -MAX ? -(1<<15) : y;
+  z = LOBO_fc(x,y,12,8,12); 
+  return ((Dtype)z / (1 << 2 * P));
+ //return *a * *b;
 }
-
-__device__  uint32_t uint_as_floatV2_fc (float a)
-{
-    uint32_t r;
-    memcpy (&r, &a, sizeof r);
-    return r;
-}
-
-__device__ float float_as_uintV2_fc (uint32_t a)
-{
-    float r;
-    memcpy (&r, &a, sizeof r);
-    return r;
-}
-
-__device__ float fp32_mul_ILM_fc (float a, float b, uint8_t iter)
-{
-    return float_as_uintV2_fc(fp32_mul_core_fc (uint_as_floatV2_fc(a), uint_as_floatV2_fc(b),iter));
-}
-
 
   template <typename Dtype>
-__global__ void FCCForward_float(const int nthreads,
+__global__ void FCCForward(const int nthreads,
 		const Dtype* bottom_data, const Dtype*  weight,
     Dtype* top_data, int M, int N, int K, const Dtype* bias,
     const int bias_term_, const Dtype* const bias_multiplier) {
@@ -210,11 +222,21 @@ __global__ void FCCForward_float(const int nthreads,
 
     Dtype aveval = 0;
     
+//		if (index==1) {
+//			printf("pw%d ph%d c%d n%d \n",pw,ph,c,n);
+//			printf("hstart%d wstart%d hend%d wend%d \n",hstart,wstart,hend,wend);
+//		}
+
+
+   
+  
     for(int pk = 0; pk < K; pk++){
 
-      aveval += bottom_data[ph*K + pk]*weight[pk + pw*K];
-      
+      // aveval += bottom_data[ph*K + pk]*weight[pk + pw*K];
+      // aveval += mult_fixed((double)bottom_data[ph*K + pk],(double)weight[pk + pw*K]);
+      aveval += mult_fixed_fc(bottom_data+ph*K + pk,weight + pk + pw*K);
     }
+
      // Bias multiplier needs to be checked, I have a bad feeling that  something isn't working like it should. Still, we managed to 
      // create inner product. At the end filter were in shape of N*K not K*N
 		 if(bias_term_) {  
@@ -224,78 +246,7 @@ __global__ void FCCForward_float(const int nthreads,
 	}
 }
 
-  template <typename Dtype>
-__global__ void FCCForward_bfloat(const int nthreads,
-		const Dtype* bottom_data, const Dtype*  weight,
-    Dtype* top_data, int M, int N, int K, const Dtype* bias,
-    const int bias_term_, const Dtype* const bias_multiplier) {
-	CUDA_KERNEL_LOOP(index, nthreads) {
-
-		const int pw = index % N;
-    const int ph = index / N;
-
-    Dtype aveval = 0;
-    
-    for(int pk = 0; pk < K; pk++){
-      float A = bottom_data[ph*K + pk];
-      float B = weight[pk + pw*K];
-      float tempA = 0;
-      float tempB = 0;
-      float2bfloat_fc(A, tempA);
-      float2bfloat_fc(B, tempB);
-      float mult = tempA * tempB;
-      float real_ma_out = 0;
-        //printf("A: %4.4f, B: %4.4f, P: %4.4f\n",A,B,real_ma_out);
-      float2bfloat_fc(mult,real_ma_out);
-      aveval += real_ma_out;
-      //aveval += bottom_data[ph*K + pk]*weight[pk + pw*K];
-      
-    }
-     // Bias multiplier needs to be checked, I have a bad feeling that  something isn't working like it should. Still, we managed to 
-     // create inner product. At the end filter were in shape of N*K not K*N
-		 if(bias_term_) {  
-		 	aveval+=bias[pw]*bias_multiplier[ph];
-	  }
-		top_data[index] = aveval;
-	}
-}
-
-  template <typename Dtype>
-__global__ void FCCForward_ILM1(const int nthreads,
-		const Dtype* bottom_data, const Dtype*  weight,
-    Dtype* top_data, int M, int N, int K, const Dtype* bias,
-    const int bias_term_, const Dtype* const bias_multiplier) {
-	CUDA_KERNEL_LOOP(index, nthreads) {
-
-		const int pw = index % N;
-    const int ph = index / N;
-
-    Dtype aveval = 0;
-    
-    for(int pk = 0; pk < K; pk++){
-      float A = bottom_data[ph*K + pk];
-      float B = weight[pk + pw*K];
-      float tempA = 0;
-      float tempB = 0;
-      float2bfloat_fc(A, tempA);
-      float2bfloat_fc(B, tempB);
-      float mult = fp32_mul_ILM_fc(tempA,tempB,2);
-      float real_ma_out = 0;
-        //printf("A: %4.4f, B: %4.4f, P: %4.4f\n",A,B,real_ma_out);
-      float2bfloat_fc(mult,real_ma_out);
-      aveval += real_ma_out;
-      //aveval += bottom_data[ph*K + pk]*weight[pk + pw*K];
-      
-    }
-     // Bias multiplier needs to be checked, I have a bad feeling that  something isn't working like it should. Still, we managed to 
-     // create inner product. At the end filter were in shape of N*K not K*N
-		 if(bias_term_) {  
-		 	aveval+=bias[pw]*bias_multiplier[ph];
-	  }
-		top_data[index] = aveval;
-	}
-}
-
+  
 
 template <typename Dtype>
 void InnerProductApproxLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
@@ -307,53 +258,28 @@ void InnerProductApproxLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bot
 
   if (bias_term_) {
     const Dtype* const bias = this->blobs_[1]->gpu_data();
-
-    switch(mult_type){
-        case 2: 
-          FCCForward_bfloat<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,bias,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        case 3: 
-          FCCForward_ILM1<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,bias,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        case 4: 
-          FCCForward_float<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,bias,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        default:
-          printf("Wrong multiplier \n");
-          return;
-      }
-
-    /*
     FCCForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count,bottom_data, weight, top_data, M_, N_, K_,bias,bias_term_,bias_multiplier_.gpu_data());
-        */
   } else {
-
-    switch(mult_type){
-        case 2: 
-          FCCForward_bfloat<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,0,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        case 3: 
-          FCCForward_ILM1<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,0,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        case 4: 
-          FCCForward_float<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
-            count,bottom_data, weight, top_data, M_, N_, K_,0,bias_term_,bias_multiplier_.gpu_data());
-          break;
-        default:
-          printf("Wrong multiplier \n");
-          return;
-      }
-    /*
     FCCForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
         count,bottom_data, weight, top_data, M_, N_, K_,0,bias_term_,bias_multiplier_.gpu_data());
-        */
   }
+  //  printf("Print %d \n", bottom.size());
+
+  // for (int i = 0; i < bottom.size(); ++i) {
+  //   const Dtype* bottom_data = bottom[i]->gpu_data();
+	// 	Dtype* top_data = top[i]->mutable_gpu_data();
+	// 	const int count = top[i]->count();
+  //   if (bias_term_) {
+  //       const Dtype* const bias = this->blobs_[1]->gpu_data();
+  //       FCCForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
+  //           count,bottom_data, weight, top_data, M_, N_, K_,bias,bias_term_);
+  //     } else {
+  //       FCCForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
+  //           count,bottom_data, weight, top_data, M_, N_, K_,0,bias_term_);
+  //     }
+  // }
+
 
 }
 
@@ -366,12 +292,12 @@ void InnerProductApproxLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& to
     const Dtype* bottom_data = bottom[0]->gpu_data();
     // Gradient with respect to weight
     if (transpose_) {
-      caffe_gpu_gemm_approxV2<Dtype>(CblasTrans, CblasNoTrans,
+      caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
           K_, N_, M_,
           (Dtype)1., bottom_data, top_diff,
           (Dtype)1., this->blobs_[0]->mutable_gpu_diff());
     } else {
-      caffe_gpu_gemm_approxV2<Dtype>(CblasTrans, CblasNoTrans,
+      caffe_gpu_gemm<Dtype>(CblasTrans, CblasNoTrans,
           N_, K_, M_,
           (Dtype)1., top_diff, bottom_data,
           (Dtype)1., this->blobs_[0]->mutable_gpu_diff());
@@ -388,12 +314,12 @@ void InnerProductApproxLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& to
     const Dtype* top_diff = top[0]->gpu_diff();
     // Gradient with respect to bottom data
     if (transpose_) {
-      caffe_gpu_gemm_approxV2<Dtype>(CblasNoTrans, CblasTrans,
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasTrans,
           M_, K_, N_,
           (Dtype)1., top_diff, this->blobs_[0]->gpu_data(),
           (Dtype)0., bottom[0]->mutable_gpu_diff());
     } else {
-      caffe_gpu_gemm_approxV2<Dtype>(CblasNoTrans, CblasNoTrans,
+      caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans,
           M_, K_, N_,
          (Dtype)1., top_diff, this->blobs_[0]->gpu_data(),
          (Dtype)0., bottom[0]->mutable_gpu_diff());
