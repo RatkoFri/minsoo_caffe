@@ -79,7 +79,7 @@ __device__ int LOBO_fc(int x, int y, char d, char qx, char qy) {
 }
 
 
-__device__ LM_fc( int a,  int b, unsigned short w) {
+__device__ int LM_fc( int a,  int b, unsigned short w) {
     unsigned short n;
 	n = 16;
 	if(a == 0 || b == 0) return 0;
