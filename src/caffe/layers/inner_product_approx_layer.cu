@@ -24,6 +24,7 @@ extern unsigned int mult_type;         // multiplier mode
 #define MANT_LSB           (0x00000001)
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
+#define ITER 1
 
 namespace caffe {
 
@@ -279,7 +280,7 @@ __global__ void FCCForward_ILM1(const int nthreads,
       float tempB = 0;
       float2bfloat_fc(A, tempA);
       float2bfloat_fc(B, tempB);
-      float mult = fp32_mul_ILM_fc(tempA,tempB,2);
+      float mult = fp32_mul_ILM_fc(tempA,tempB,ITER);
       float real_ma_out = 0;
         //printf("A: %4.4f, B: %4.4f, P: %4.4f\n",A,B,real_ma_out);
       float2bfloat_fc(mult,real_ma_out);
