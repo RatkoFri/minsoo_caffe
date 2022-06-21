@@ -35,7 +35,7 @@ ENV CLONE_TAG=1.0
 RUN apt-get install -y libprotobuf-dev libleveldb-dev libsnappy-dev libopencv-dev libhdf5-serial-dev protobuf-compiler libgflags-dev libgoogle-glog-dev liblmdb-dev libatlas-base-dev git
 
 RUN  apt-get -y install --no-install-recommends libboost-all-dev
-
+# RATKO: Dont forget to merge bilberryV2 branch and master branch
 RUN git clone --depth 1 https://github.com/RatkoFri/minsoo_caffe.git . && \
     pip install --upgrade "pip < 20"  && \
     cd python && for req in $(cat requirements.txt) pydot; do python -m pip install $req; done && cd .. 
@@ -57,7 +57,7 @@ RUN ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake
 RUN cmake --version
 
 RUN mkdir build && cd build && \
-    cmake -DUSE_CUDNN=0 -DUSE_NCCL=0 -DCUDA_ARCH_NAME=Pascal .. && \
+    cmake -DUSE_CUDNN=0 -DUSE_NCCL=0 -DCUDA_ARCH_NAME=Volta .. && \
     make -j"$(nproc)"
 
 ENV PYCAFFE_ROOT $CAFFE_ROOT/python
