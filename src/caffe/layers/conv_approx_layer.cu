@@ -33,7 +33,7 @@ __device__ void float2bfloat_conv(const float src, float& dst) {
   q[0] = p[0];
   q[1] = 0;
 #else
-	q[0] = 0;#
+	q[0] = 0;
 	q[1] = p[1];
 #endif
 }
