@@ -381,7 +381,7 @@ void InnerProductApproxLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& to
   if (bias_term_ && this->param_propagate_down_[1]) {
     const Dtype* top_diff = top[0]->gpu_diff();
     // Gradient with respect to bias
-    caffe_gpu_gemv<Dtype>(CblasTrans, M_, N_, (Dtype)1., top_diff,
+    caffe_gpu_gemv_approxV2<Dtype>(CblasTrans, M_, N_, (Dtype)1., top_diff,
         bias_multiplier_.gpu_data(), (Dtype)1.,
         this->blobs_[1]->mutable_gpu_diff());
   }
