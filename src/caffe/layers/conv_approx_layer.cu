@@ -22,6 +22,7 @@ extern unsigned int mult_type;         // multiplier mode
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
 #define ITER 2
+#define BITMASK ~((1<<6)-1)
 
 namespace caffe {
 
@@ -78,7 +79,7 @@ __device__ uint16_t ILM_conv(uint8_t a, uint8_t b, uint8_t iter){
         prod1 = ResA * (1<<Kb) + Res2B * (1<<Ka);
     }
 
-    return prod0 + prod1;
+    return prod0 + (prod1 & BITMASK);
 }
 
 __device__ uint32_t fp32_mul_core_conv (uint32_t a, uint32_t b, uint8_t iter)

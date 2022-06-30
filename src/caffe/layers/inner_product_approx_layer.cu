@@ -25,7 +25,7 @@ extern unsigned int mult_type;         // multiplier mode
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
 #define ITER 2
-
+#define BITMASK ~((1<<6)-1)
 namespace caffe {
 
 
@@ -82,7 +82,7 @@ __device__ uint16_t ILM_fc(uint8_t a, uint8_t b, uint8_t iter){
         prod1 = ResA * (1<<Kb) + Res2B * (1<<Ka);
     }
 
-    return prod0 + prod1;
+    return prod0 + (prod1 & BITMASK);
 }
 
 __device__ uint32_t fp32_mul_core_fc (uint32_t a, uint32_t b, uint8_t iter)
@@ -381,7 +381,7 @@ void InnerProductApproxLayer<Dtype>::Backward_gpu(const vector<Blob<Dtype>*>& to
   if (bias_term_ && this->param_propagate_down_[1]) {
     const Dtype* top_diff = top[0]->gpu_diff();
     // Gradient with respect to bias
-    caffe_gpu_gemv_approxV2<Dtype>(CblasTrans, M_, N_, (Dtype)1., top_diff,
+    caffe_gpu_gemv<Dtype>(CblasTrans, M_, N_, (Dtype)1., top_diff,
         bias_multiplier_.gpu_data(), (Dtype)1.,
         this->blobs_[1]->mutable_gpu_diff());
   }

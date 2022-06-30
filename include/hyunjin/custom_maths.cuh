@@ -52,6 +52,8 @@
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
 
+#define BITMASK  ~((1<<6) - 1)
+
 #ifndef NDEBUG
 #include <stdio.h>
 #define debug(M,...) fprintf(stderr,"DEBUG: %s: %d: " M "\n", __FILE__,__LINE__,##__VA_ARGS__)
@@ -364,7 +366,7 @@ __device__ uint16_t ILM(uint8_t a, uint8_t b, uint8_t iter){
               prod2 = Res2A * (1<<Kb) + Res3B * (1<<Ka);
           }
       }
-    return prod0 + prod1 + prod2;
+    return prod0 + ((prod1 + prod2) & BITMASK);
 }
 
 __device__ uint32_t fp32_mul_core (uint32_t a, uint32_t b, uint8_t iter)
