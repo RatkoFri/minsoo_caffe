@@ -82,7 +82,7 @@ __device__ uint16_t ILM_fc(uint8_t a, uint8_t b, uint8_t iter){
         prod1 = ResA * (1<<Kb) + Res2B * (1<<Ka);
     }
 
-    return prod0 + (prod1 & BITMASK);
+    return prod0 + prod1;
 }
 
 __device__ uint32_t fp32_mul_core_fc (uint32_t a, uint32_t b, uint8_t iter)

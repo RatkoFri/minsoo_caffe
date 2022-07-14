@@ -366,7 +366,7 @@ __device__ uint16_t ILM(uint8_t a, uint8_t b, uint8_t iter){
               prod2 = Res2A * (1<<Kb) + Res3B * (1<<Ka);
           }
       }
-    return prod0 + ((prod1 + prod2) & BITMASK);
+    return prod0 + ((prod1 + prod2));
 }
 
 __device__ uint32_t fp32_mul_core (uint32_t a, uint32_t b, uint8_t iter)
