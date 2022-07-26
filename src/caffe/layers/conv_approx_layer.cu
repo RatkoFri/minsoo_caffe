@@ -21,7 +21,7 @@ extern unsigned int mult_type;         // multiplier mode
 #define MANT_LSB           (0x00000001)
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
-#define ITER 2
+#define ITER 1
 #define BITMASK ~((1<<6)-1)
 
 namespace caffe {
