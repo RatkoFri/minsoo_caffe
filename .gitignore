@@ -123,3 +123,4 @@ log_list
 tags
 *.acc
 *.sh
+*.workspace
