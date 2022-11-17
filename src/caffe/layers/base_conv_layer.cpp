@@ -465,6 +465,13 @@ void BaseConvolutionLayer<Dtype>::weight_gpu_gemm_approx(const Dtype* input,
   }
 }
 
+template <typename Dtype>
+void BaseConvolutionLayer<Dtype>::backward_gpu_bias_approx(Dtype* bias,
+    const Dtype* input) {
+  caffe_gpu_gemv_approxV2<Dtype>(CblasNoTrans, num_output_, out_spatial_dim_, 1.,
+      input, bias_multiplier_.gpu_data(), 1., bias);
+}
+
 #endif  // !CPU_ONLY
 
 INSTANTIATE_CLASS(BaseConvolutionLayer);
