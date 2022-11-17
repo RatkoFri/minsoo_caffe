@@ -63,7 +63,8 @@ class BaseConvolutionLayer : public Layer<Dtype> {
   void backward_gpu_gemm_approx(const Dtype* input, const Dtype* weights,
       Dtype* col_output);
   void weight_gpu_gemm_approx(const Dtype* col_input, const Dtype* output, Dtype*
-      weights);    
+      weights); 
+  void backward_gpu_bias_approx(Dtype* bias, const Dtype* input);   
 #endif
 
   /// @brief The spatial dimensions of the input.
