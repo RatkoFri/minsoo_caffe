@@ -52,6 +52,8 @@
 #define FLOAT_QNAN_BIT     (0x00400000)
 #define MAX_SHIFT          (FLOAT_MANT_BITS + 2)
 
+#define ITER 1
+
 #define BITMASK  ~((1<<6) - 1)
 
 #ifndef NDEBUG
